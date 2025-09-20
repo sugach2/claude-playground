@@ -1,6 +1,7 @@
 name: Claude Code Review
 
 on:
+  workflow_dispatch:
   pull_request:
     types: [opened, synchronize, reopened, labeled]
   issue_comment:
@@ -12,39 +13,61 @@ permissions:
   issues: write
   id-token: write
 
+concurrency:
+  group: claude-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   # PRラベルや更新で自動レビュー
   review_on_label:
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
         with:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
           fetch-depth: 0
+
       - name: Claude Review (/review)
         uses: anthropics/claude-code-action@v1
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
-          prompt: "/review"              # ← これだけでOK
+          prompt: "/review"
           # claude_args: |
           #   --model claude-3-sonnet-20240229
-        # 失敗をPR全体に波及させたくないなら下の1行を付ける（運用A）
-        # continue-on-error: true
+          #   --max-turns 6
+
+      - name: Upload debug logs on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: claude-debug-logs
+          path: ${{ runner.temp }}/_github_workflow/*
 
   # コメントでの即時レビュー（@claude 検出はActionが自動でやる）
   reply_on_comment:
-    if: github.event_name == 'issue_comment' && github.event.issue.pull_request != null
+    if: github.event_name == 'issue_comment'
+        && github.event.issue.pull_request != null
+        && contains(github.event.comment.body, '@claude')
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
         with:
           ref: ${{ github.sha }}
           fetch-depth: 0
+
       - name: Claude Reply (auto)
         uses: anthropics/claude-code-action@v1
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
-          # ← prompt/trigger は渡さない（@claude自動検出）
+
+      - name: Upload debug logs on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: claude-debug-logs
+          path: ${{ runner.temp }}/_github_workflow/*
