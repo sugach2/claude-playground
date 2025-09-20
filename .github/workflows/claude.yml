@@ -14,13 +14,12 @@ permissions:
 
 jobs:
   review:
-    # コメントでも「PRに紐づくコメント」だけ通す
     if: >
       (github.event_name == 'pull_request') ||
       (github.event_name == 'issue_comment' && github.event.issue.pull_request != null)
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
-      # PRのheadを確実にチェックアウト
       - name: Checkout PR head
         uses: actions/checkout@v4
         with:
@@ -28,17 +27,28 @@ jobs:
           fetch-depth: 0
 
       - name: Claude Review
+        id: claude
         uses: anthropics/claude-code-action@v1
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           trigger_phrase: "@claude"
           label_trigger: "claude"
-          claude_args: |
-            --model claude-sonnet-4-20250514
-            --max-turns 6
+          # まずは既定モデルに任せる（モデル名起因の失敗切り分け）
+          # claude_args: |
+          #   --model claude-sonnet-4-20250514
+          #   --max-turns 6
         env:
-          # 保険として環境変数でも渡す
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-        # 最後の保険：失敗でもジョブ全体を赤にしない（動作確認中のみ）
-        continue-on-error: true
+
+      # 失敗時にログを保存（あとでWebからダウンロード可能）
+      - name: Upload debug logs on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: claude-debug-logs
+          path: |
+            ${{ runner.temp }}/_github_workflow/*
+            **/*.log
+            **/stdout*
+            **/stderr*
