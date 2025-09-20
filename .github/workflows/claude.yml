@@ -13,42 +13,38 @@ permissions:
   id-token: write
 
 jobs:
-  review:
-    if: >
-      (github.event_name == 'pull_request') ||
-      (github.event_name == 'issue_comment' && github.event.issue.pull_request != null)
+  # PRラベルや更新で自動レビュー
+  review_on_label:
+    if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
-    timeout-minutes: 15
     steps:
-      - name: Checkout PR head
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
         with:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
           fetch-depth: 0
-
-      - name: Claude Review
-        id: claude
+      - name: Claude Review (/review)
         uses: anthropics/claude-code-action@v1
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
-          trigger_phrase: "@claude"
-          label_trigger: "claude"
-          prompt: "/review"
-          claude_args: |
-            --model claude-3-sonnet-20240229
-            --max-turns 6
-        env:
-          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          prompt: "/review"              # ← これだけでOK
+          # claude_args: |
+          #   --model claude-3-sonnet-20240229
+        # 失敗をPR全体に波及させたくないなら下の1行を付ける（運用A）
+        # continue-on-error: true
 
-      # 失敗時にログを保存（あとでWebからダウンロード可能）
-      - name: Upload debug logs on failure
-        if: failure()
-        uses: actions/upload-artifact@v4
+  # コメントでの即時レビュー（@claude 検出はActionが自動でやる）
+  reply_on_comment:
+    if: github.event_name == 'issue_comment' && github.event.issue.pull_request != null
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
         with:
-          name: claude-debug-logs
-          path: |
-            ${{ runner.temp }}/_github_workflow/*
-            **/*.log
-            **/stdout*
-            **/stderr*
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+      - name: Claude Reply (auto)
+        uses: anthropics/claude-code-action@v1
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          # ← prompt/trigger は渡さない（@claude自動検出）
